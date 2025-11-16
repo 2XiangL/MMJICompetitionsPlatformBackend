@@ -1,12 +1,31 @@
 const db = require("../models/database");
 
 const getAllCompetitions = (req, res) => {
-	const sql = "select * from competitions order by time desc";
-	db.all(sql, [], (err, rows) => {
-		if (err) {
-			return res.status(500).json({ error: err.message });
+	const page = parseInt(req.query.page) || 1;
+	const limit = parseInt(req.query.limit) || 12;
+	const offset = (page - 1) * limit;
+
+	const sql = `SELECT * FROM competitions ORDER BY time DESC LIMIT ? OFFSET ?`;
+	const countSql = `SELECT COUNT(*) as total FROM competitions`;
+
+	db.get(countSql, [], (countErr, countRow) => {
+		if (countErr) {
+			return res.status(500).json({ error: countErr.message });
 		}
-		res.json(rows);
+
+		db.all(sql, [limit, offset], (err, rows) => {
+			if (err) {
+				return res.status(500).json({ error: err.message });
+			}
+
+			res.json({
+				competitions: rows,
+				total: countRow.total,
+				page: page,
+				limit: limit,
+				hasMore: offset + rows.length < countRow.total
+			});
+		});
 	});
 };
 
@@ -53,21 +72,24 @@ const getTeamsByCompetitionID = (req, res) => {
 	const { id } = req.params;
 	const { offset = 0, limit = 10 } = req.query; // Default to 10 teams per page
 	
-	// SQL to get teams with pagination
+	// SQL to get teams with pagination - only show approved teams
+	// 使用LEFT JOIN来处理匿名用户(user_id = 0)
 	const sql = `
-		SELECT t.*, u.real_name, u.username
+		SELECT t.*,
+		       CASE WHEN t.user_id = 0 THEN '匿名用户' ELSE u.real_name END as real_name,
+		       CASE WHEN t.user_id = 0 THEN 'anonymous' ELSE u.username END as username
 		FROM teams t
-		JOIN users u ON t.user_id = u.id
-		WHERE t.competition_id = ?
+		LEFT JOIN users u ON t.user_id = u.id
+		WHERE t.competition_id = ? AND t.status = 'approved'
 		ORDER BY t.created_at DESC
 		LIMIT ? OFFSET ?
 	`;
 
-	// Count total teams for this competition
+	// Count total teams for this competition - only count approved teams
 	const countSql = `
 		SELECT COUNT(*) as total
 		FROM teams t
-		WHERE t.competition_id = ?
+		WHERE t.competition_id = ? AND t.status = 'approved'
 	`;
 
 	db.get(countSql, [id], (countErr, countRow) => {

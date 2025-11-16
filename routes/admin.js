@@ -12,14 +12,6 @@ router.get("/stats/competitions", adminController.getCompetitionStats);
 router.get("/stats/teams", adminController.getTeamStats);
 router.get("/activities/recent", adminController.getRecentActivities);
 
-// 用户管理接口
-router.get("/users", adminController.getUsers);
-router.post("/users", adminController.createUser);
-router.put("/users/:id", adminController.updateUser);
-router.put("/users/:id/auth", adminController.updateUserAuth);
-router.delete("/users/:id", adminController.deleteUser);
-router.put("/users/batch-auth", adminController.batchUpdateAuth);
-router.delete("/users/batch", adminController.batchDeleteUsers);
 
 // 竞赛管理接口
 router.get("/competitions", adminController.getCompetitions);
@@ -33,5 +25,12 @@ router.delete("/competitions/batch", adminController.batchDeleteCompetitions);
 router.get("/teams", adminController.getTeams);
 router.delete("/teams/:id", adminController.deleteTeam);
 router.delete("/teams/batch", adminController.batchDeleteTeams);
+
+// 组队审核接口
+router.get("/teams/pending", adminController.getPendingTeams);
+router.put("/teams/:id/approve", adminController.approveTeam);
+router.put("/teams/:id/reject", adminController.rejectTeam);
+router.put("/teams/batch-approve", adminController.batchApproveTeams);
+router.put("/teams/batch-reject", adminController.batchRejectTeams);
 
 module.exports = router;

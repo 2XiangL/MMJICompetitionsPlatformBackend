@@ -45,6 +45,7 @@ const createTables = () => { // 回调函数内部的所有数据库操作序列
 				roles_needed text,
 				member_count integer,
 				contact_info text,
+				status text default 'pending' check (status in ('pending', 'approved', 'rejected')),
 				created_at datetime default current_timestamp,
 				foreign key (competition_id) references competitions(id),
 				foreign key (user_id) references users(id)
@@ -85,21 +86,17 @@ const createTables = () => { // 回调函数内部的所有数据库操作序列
 			insert or ignore into users (username, password, real_name, student_id, auth_status, role) values (?, ?, ?, ?, ?, ?)
 		`);
 
-		const password = "123456";
-
-		userStmt.run(["test", "Chx2233666!", "chx", 202331123002016, false, 'user']);
-
-		// Create initial admin account
+		// Create initial admin account only
 		userStmt.run(["system_admin", "admin123", "系统管理员", 0, 1, 'admin']);
 
 		userStmt.finalize();
 
 		const teamStmt = db.prepare(`
-			insert or ignore into teams (competition_id, user_id, title, roles_needed, member_count, contact_info)
-			values (?, ?, ?, ?, ?, ?)
+			insert or ignore into teams (competition_id, user_id, title, roles_needed, member_count, contact_info, status)
+			values (?, ?, ?, ?, ?, ?, ?)
 		`);
 
-		teamStmt.run([1, 1, "测试标题", "两个人", 2, "1234567@abc.com"]);
+		teamStmt.run([1, 1, "测试标题", "两个人", 2, "1234567@abc.com", "approved"]);
 
 		teamStmt.finalize();
 	});

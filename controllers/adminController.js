@@ -34,12 +34,24 @@ const getCompetitionStats = (req, res) => {
 };
 
 const getTeamStats = (req, res) => {
-  const sql = `SELECT COUNT(*) as total FROM teams`;
+  const sql = `
+    SELECT
+      COUNT(*) as total,
+      COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
+      COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved,
+      COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected
+    FROM teams
+  `;
   db.get(sql, [], (err, result) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    res.json({ total: result.total });
+    res.json({
+      total: result.total,
+      pending: result.pending,
+      approved: result.approved,
+      rejected: result.rejected
+    });
   });
 };
 
@@ -96,142 +108,6 @@ const getRecentActivities = (req, res) => {
   });
 };
 
-// 用户管理接口
-const getUsers = (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 20;
-  const offset = (page - 1) * limit;
-
-  const sql = `SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-  const countSql = `SELECT COUNT(*) as total FROM users`;
-
-  db.get(countSql, [], (err, countResult) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-
-    db.all(sql, [limit, offset], (err, users) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({
-        users,
-        total: countResult.total,
-        page,
-        limit
-      });
-    });
-  });
-};
-
-const createUser = (req, res) => {
-  const { username, password, real_name, student_id, auth_status } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({ message: '用户名和密码不能为空' });
-  }
-
-  const checkSql = `SELECT * FROM users WHERE username = ?`;
-  db.get(checkSql, [username], (err, existingUser) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    if (existingUser) {
-      return res.status(400).json({ message: '用户名已存在' });
-    }
-
-    const insertSql = `INSERT INTO users (username, password, real_name, student_id, auth_status) VALUES (?, ?, ?, ?, ?)`;
-    db.run(insertSql, [username, password, real_name, student_id, auth_status || 0], function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.status(201).json({ message: '用户创建成功', userId: this.lastID });
-    });
-  });
-};
-
-const updateUser = (req, res) => {
-  const { id } = req.params;
-  const { real_name, student_id, auth_status } = req.body;
-
-  const sql = `UPDATE users SET real_name = ?, student_id = ?, auth_status = ? WHERE id = ?`;
-  db.run(sql, [real_name, student_id, auth_status, id], function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    if (this.changes === 0) {
-      return res.status(404).json({ message: '用户不存在' });
-    }
-    res.json({ message: '用户信息更新成功' });
-  });
-};
-
-const updateUserAuth = (req, res) => {
-  const { id } = req.params;
-  const { auth_status } = req.body;
-
-  const sql = `UPDATE users SET auth_status = ? WHERE id = ?`;
-  db.run(sql, [auth_status, id], function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    if (this.changes === 0) {
-      return res.status(404).json({ message: '用户不存在' });
-    }
-    res.json({ message: '认证状态更新成功' });
-  });
-};
-
-const deleteUser = (req, res) => {
-  const { id } = req.params;
-
-  const sql = `DELETE FROM users WHERE id = ?`;
-  db.run(sql, [id], function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    if (this.changes === 0) {
-      return res.status(404).json({ message: '用户不存在' });
-    }
-    res.json({ message: '用户删除成功' });
-  });
-};
-
-const batchUpdateAuth = (req, res) => {
-  const { user_ids, auth_status } = req.body;
-
-  if (!user_ids || !Array.isArray(user_ids)) {
-    return res.status(400).json({ message: '用户ID列表不能为空' });
-  }
-
-  const placeholders = user_ids.map(() => '?').join(',');
-  const sql = `UPDATE users SET auth_status = ? WHERE id IN (${placeholders})`;
-
-  db.run(sql, [auth_status, ...user_ids], function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    res.json({ message: `批量更新认证状态成功，影响${this.changes}个用户` });
-  });
-};
-
-const batchDeleteUsers = (req, res) => {
-  const { user_ids } = req.body;
-
-  if (!user_ids || !Array.isArray(user_ids)) {
-    return res.status(400).json({ message: '用户ID列表不能为空' });
-  }
-
-  const placeholders = user_ids.map(() => '?').join(',');
-  const sql = `DELETE FROM users WHERE id IN (${placeholders})`;
-
-  db.run(sql, user_ids, function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    res.json({ message: `批量删除成功，删除${this.changes}个用户` });
-  });
-};
 
 // 竞赛管理接口
 const getCompetitions = (req, res) => {
@@ -360,23 +236,37 @@ const getTeams = (req, res) => {
   const limit = parseInt(req.query.limit) || 20;
   const offset = (page - 1) * limit;
   const competition_id = req.query.competition_id;
+  const status = req.query.status;
   const order = req.query.order || 'desc';
 
   let sql = `
-    SELECT t.*, c.name as competition_name, u.real_name, u.username
+    SELECT t.*, c.name as competition_name,
+           CASE WHEN t.user_id = 0 THEN '匿名用户' ELSE u.real_name END as real_name,
+           CASE WHEN t.user_id = 0 THEN 'anonymous' ELSE u.username END as username
     FROM teams t
     JOIN competitions c ON t.competition_id = c.id
-    JOIN users u ON t.user_id = u.id
+    LEFT JOIN users u ON t.user_id = u.id
   `;
 
   let countSql = `SELECT COUNT(*) as total FROM teams t`;
 
   const params = [];
+  const whereConditions = [];
 
   if (competition_id) {
-    sql += ` WHERE t.competition_id = ?`;
-    countSql += ` WHERE t.competition_id = ?`;
+    whereConditions.push(`t.competition_id = ?`);
     params.push(competition_id);
+  }
+
+  if (status) {
+    whereConditions.push(`t.status = ?`);
+    params.push(status);
+  }
+
+  if (whereConditions.length > 0) {
+    const whereClause = ` WHERE ` + whereConditions.join(' AND ');
+    sql += whereClause;
+    countSql += whereClause;
   }
 
   sql += ` ORDER BY t.created_at ${order} LIMIT ? OFFSET ?`;
@@ -433,21 +323,117 @@ const batchDeleteTeams = (req, res) => {
   });
 };
 
+// 组队审核相关接口
+const getPendingTeams = (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 20;
+  const offset = (page - 1) * limit;
+
+  const sql = `
+    SELECT t.*, c.name as competition_name,
+           CASE WHEN t.user_id = 0 THEN '匿名用户' ELSE u.real_name END as real_name,
+           CASE WHEN t.user_id = 0 THEN 'anonymous' ELSE u.username END as username
+    FROM teams t
+    JOIN competitions c ON t.competition_id = c.id
+    LEFT JOIN users u ON t.user_id = u.id
+    WHERE t.status = 'pending'
+    ORDER BY t.created_at DESC
+    LIMIT ? OFFSET ?
+  `;
+
+  const countSql = `SELECT COUNT(*) as total FROM teams WHERE status = 'pending'`;
+
+  db.get(countSql, [], (err, countResult) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    db.all(sql, [limit, offset], (err, teams) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({
+        teams,
+        total: countResult.total,
+        page,
+        limit
+      });
+    });
+  });
+};
+
+const approveTeam = (req, res) => {
+  const { id } = req.params;
+
+  const sql = `UPDATE teams SET status = 'approved' WHERE id = ?`;
+  db.run(sql, [id], function(err) {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (this.changes === 0) {
+      return res.status(404).json({ message: '团队不存在' });
+    }
+    res.json({ message: '团队审核通过' });
+  });
+};
+
+const rejectTeam = (req, res) => {
+  const { id } = req.params;
+
+  const sql = `UPDATE teams SET status = 'rejected' WHERE id = ?`;
+  db.run(sql, [id], function(err) {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (this.changes === 0) {
+      return res.status(404).json({ message: '团队不存在' });
+    }
+    res.json({ message: '团队已拒绝' });
+  });
+};
+
+const batchApproveTeams = (req, res) => {
+  const { team_ids } = req.body;
+
+  if (!team_ids || !Array.isArray(team_ids)) {
+    return res.status(400).json({ message: '团队ID列表不能为空' });
+  }
+
+  const placeholders = team_ids.map(() => '?').join(',');
+  const sql = `UPDATE teams SET status = 'approved' WHERE id IN (${placeholders})`;
+
+  db.run(sql, team_ids, function(err) {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json({ message: `批量审核通过成功，影响${this.changes}个团队` });
+  });
+};
+
+const batchRejectTeams = (req, res) => {
+  const { team_ids } = req.body;
+
+  if (!team_ids || !Array.isArray(team_ids)) {
+    return res.status(400).json({ message: '团队ID列表不能为空' });
+  }
+
+  const placeholders = team_ids.map(() => '?').join(',');
+  const sql = `UPDATE teams SET status = 'rejected' WHERE id IN (${placeholders})`;
+
+  db.run(sql, team_ids, function(err) {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json({ message: `批量拒绝成功，影响${this.changes}个团队` });
+  });
+};
+
 module.exports = {
   // 统计数据
   getUserStats,
   getCompetitionStats,
   getTeamStats,
   getRecentActivities,
-
-  // 用户管理
-  getUsers,
-  createUser,
-  updateUser,
-  updateUserAuth,
-  deleteUser,
-  batchUpdateAuth,
-  batchDeleteUsers,
 
   // 竞赛管理
   getCompetitions,
@@ -460,5 +446,12 @@ module.exports = {
   // 团队管理
   getTeams,
   deleteTeam,
-  batchDeleteTeams
+  batchDeleteTeams,
+
+  // 组队审核
+  getPendingTeams,
+  approveTeam,
+  rejectTeam,
+  batchApproveTeams,
+  batchRejectTeams
 };
